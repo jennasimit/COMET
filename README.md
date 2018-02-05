@@ -1,0 +1,2 @@
+# COMET
+COMET (Corrected Overlap and Marginal Enrichment Test) is a computationally efficient method for identifying SNP features (e.g. functional annotation) that are predictive of associated SNPs that are shared between traits, while adjusting for the marginal distributions of the traits. COMET also assesses enrichment at the individual trait level. Only summary statistics are required to implement COMET.
