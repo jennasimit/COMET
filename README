@@ -1,0 +1,126 @@
+This file describes how to run the COMET script written by Jennifer Asimit
+in the Metabolic Disease group led by InÃªs Barroso at the Wellcome Trust Sanger Institute.
+COMET is an outcome from Jennifer's Medical Research Council Methodology Research fellowship (MR/K021486/1).
+
+
+The analysis with COMET requires two R source files and one bash script (to run Plink). The files are called in the following sequence:
+A) prep_COMET_general_script.R
+B) clump-using-plink.sh
+C) COMET_general_script.R
+
+If a file of covariates (containing columns: SNP, BP, and a column for each covariate containing 1/0 for presence/absence of the SNP in the covariate category) 
+is already at hand, the three scripts listed above are the only scripts that the user needs to call, 
+but the other scripts are necessary for the main script to work properly.  The scripts are 
+written such that all the scripts need to be in the same directory as the data so that they can be found. 
+Note that in order to perform the clumping, a reference panel, such as from 1000 Genomes CEU, will be required. 
+
+P-value implementation: The scripts are designed for an analysis using ABFs, but can easily be applied to p-values by creating a column called "ABF" containing the -log10(p-value) for each variant 
+and setting R=1 and pi0=a/(1-a), where a=-log10(alpha). The reasoning for this is as follows.
+The ABF threshold is found from:
+PO <- pi0/(1-pi0) # prior odds of no association
+theta <- PO/R
+Then, setting R=1 and pi0=a/(1-a), where a=-log10(alpha), will carry out the analysis where variants are classified as
+significant if -log10(p-value) > -log10(alpha), since with these settings, theta = a = -log10(alpha).
+The logic for this is that the scripts are designed such that large ABF is higher evidence of association, so working with 
+-log10(p-value) and changing the threshold accordingly will allow the script to run for evidence of association measured by p-values.
+
+###
+NOTE: The script for generating six VEP covariates from VEP output is also available: VEP-output-to-covariates.R
+After running vep with the options --terms so --check_existing --regulatory, this R script may be run to convert the VEP output to 1/0 covariates for the categories:
+Q1:SNP in a transcribed but not translated region
+Q2:SNP in a translated region but does not change the amino acid
+Q3:SNP is potentially deleterious (might disrupt protein)
+Q4:SNP is potentially loss of function (might cause loss of function of protein) 
+Q5:SNP is in a potentially regulatory or regulatory region
+Q6:SNP is intergenic
+Q7-Q10 are also output, which are different variants of some of the above covariates - see the VEP-output-to-covariates.R for precise definitions
+
+The script VEP-output-to-covariates.R takes 2 arguments:
+1) VEP output file (as input)
+2) covariate output file name; this output file will contain 12 columns: SNP id (rs id if it exists or chr:BP), chr:BP, Q1,Q2,...,Q10
+
+>R CMD BATCH '--args arg_1 arg_2' VEP-output-to-covariates.R VEP-output-to-covariates.Rout
+
+###
+
+A) The first R script (prep_COMET_general_script.R) is needed to create a single file of the variants that exist for both traits, 
+to calculate the Approximate Bayes' factors (ABFs) from the summary statistics for each trait (if needed), 
+and then the joint measure for clumping in Plink. It is recommended to run this separately for each chromosome. 
+This script takes 6 input parameters, where the input files are described in greater detail below:
+1) Summary Statistics file for Trait 1 (details below)
+2) Summary Statistics file for Trait 2 (details below) 
+3) R: Ratio of type I error cost to type II error cost (R>1 gives a "discovery" mode and a value of R=20 is recommended for discovery)
+4) pi0: Prior probability of an association at a SNP (pi0=0.99 is useful for discovery, as searching for shared variants and not genome-wide significant)
+5) abf.calc: values are yes or no (case-sensitive), indicating whether ABFs need to be calculated from provided summary statistics (yes) or 
+ABFs are already available and do not need to be calculated (no). If p-values are to be used, use "no" and use the settings described in the p-value implementation above. 
+6) OUTtoclump.file: Main output file, will contain variants in both datasets, their marginal ABFs, and the joint ABF measure  needed for clumping 
+7) cc: values are yes or no (case-sensitive), indicating whether data is case-control (yes) or quantitative trait (no)
+8) trait1SE: set to 1 for all scenarios, unless doing QT analysis and trait is not standard normal nor inverse-rank normalised trait, in that case use an estimate of the trait's standard error 
+9) trait2SE: set to 1 for all scenarios, unless doing QT analysis and trait is not standard normal nor inverse-rank normalised trait, in that case use an estimate of the trait's standard error 
+10) chromosome number
+
+The Summary Statistics Files for Traits 1 and 2 are each a tab-delimited file with one line per SNP. 
+There is no need to order the SNPs in the files to match each other and it is fine to have SNPs that are present in only one file. 
+The script will format appropriately and input varies according to whether or not ABFs need to be calculated.
+
+If ABFs need to be calculated (abf.calc=TRUE)
+The columns should be (there may be additional columns, but they will be ignored):
+1) SNP	
+2) BP	
+3) REF	
+4) ALT
+5) Effect	
+6) StdErr
+7) P.value
+
+If ABFs are already available and do not need to be calculated (abf.calc=FALSE)
+The columns should be (there may be additional columns, but they will be ignored):
+1) SNP	
+2) BP	
+3) REF	
+4) ALT
+5) ABF
+
+The script is called in the following manner from the command line:
+
+>R CMD BATCH '--args arg_1 arg_2 arg_3 arg_4 arg_5 arg_6 arg_7 arg_8 arg_9 arg_10' prep_COMET_general_script.R prep_COMET_general_script.Rout
+
+
+B) It is recommended to run this separately for each chromosome. The bash script (clump-using-plink.sh) takes 2 input parameters:
+1) OUTtoclump.file, which is output after running prep_COMET_general_script.R.
+2) Reference Panel file name stub, in Plink binary format (e.g. file name stub of 1kg-ceu.bed, 1kg-ceu.bim, 1kg-ceu.fam is 1kg-ceu)
+3) chromosome number 
+
+The script is called in the following manner from the command line:
+
+./clump-using-plink.sh arg_1 arg_2 arg_3
+
+This script will output a gzipped file of approximately independent SNPs (have r^2 < 0.1), based on the joint association measures. 
+The output file has name "Output1.file"-abf.clumped.gz. E.g. If Output1.file is called "Joint-measures.txt", 
+then the output file will be "Joint-measures.txt-abf.clumped.gz"
+
+
+C) This is the main analysis step of COMET and may be repeated for any subset(s) of covariates contained in the covariate file. 
+The R script (COMET_general_script.R) takes as input the files created in the previous steps, as well as a covariate file. 
+NOTE: As the model is fit quite quickly, if several models with different covariates from the file are to be considered, it is recommended to
+run this R script interactively, reading in the files only once and then fitting the various models.
+
+The 8 input parameters are:
+1) zipped traits.file	(Concatenated chromosome output files from step (A), containing both traits)
+2) R: Ratio of type I error cost to type II error cost (R>1 gives a "discovery" mode and a value of R=20 is recommended for discovery)
+3) pi0: Prior probability of an association at a SNP (pi0=0.99 is useful for discovery, as searching for shared variants and not genome-wide significant)
+4) zipped clumped.file: output file from step (B) clump-using-plink.sh: "Output1.file"-abf.clumped.gz
+5) zipped covariate.file: file of covariate values for each SNP, containing columns: SNPid, SNP position, covariate values (1/0 for presence/absence in category)
+6) covariate.names: within-quotes, comma-separated list of covariate names to be included in model; if the model is to include cov1,cov2,cov3,cov4,cov5 use format "cov1,cov2,cov3,cov4,cov5"
+7) printsig: value 1 if significant overlap variants, their marginal statistics, and covariate values are to be output; 0 otherwise. If output, then filename is determined from the main.output.file: 
+"main.output.file"-overlap-details.txt
+8) main.output.file: COMET results for each marginal model and the overlap model (effect estimates, standard errors, p-values for positive enrichment, number of significant variants in category)
+
+
+The script is called in the following manner from the command line:
+
+>R CMD BATCH '--args arg_1 arg_2 arg_3 arg_4 arg_5 arg_6 arg_7 arg_8' COMET_general_script.R COMET_general_script.Rout
+
+
+
+
